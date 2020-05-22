@@ -1,0 +1,417 @@
+---
+title: "Citi Bike Analysis"
+author: "Stavros Oikonomou"
+date: "16/2/2020"
+---
+
+#### Analysis of citi bike database for May of 2016 at New Jersey and how the weather affectes 
+#### the usage of bikes
+
+### Data:
+The site for the dataset can be found at [Citi Bike Dataset](https://www.citibikenyc.com/system-data)
+
+This is the exact [Dataset](https://s3.amazonaws.com/tripdata/JC-201605-citibike-tripdata.csv.zip) i used for my analysis
+
+
+### The data includes:
+* Trip Duration (seconds)
+* Start Time and Date
+* Stop Time and Date
+* Start Station Name
+* End Station Name
+* Station ID
+* Station Lat/Long
+* Bike ID
+* User Type (Customer = 24-hour pass or 3-day pass user; Subscriber = Annual Member)
+* Gender (Zero=unknown; 1=male; 2=female)
+* Year of Birth
+
+### Data notes:
+* Trip count and milage estimates include trips with a duration of greater than one minute.
+* Milage estimates are calculated using an assumed speed of 7.456 miles per hour, up to two hours. Trips over two   hours max-out at 14.9 miles. Once you opt into Ride Insights, the Citi Bike app will use your phone's location    to record the route you take between your starting and ending Citi Bike station to give exact mileage.
+* We only include trips that begin at publicly available stations (thereby excluding trips that originate at our    depots for rebalancing or maintenance purposes).
+
+### Weather Database:
+I download from [Kaggle](https://www.kaggle.com/selfishgene/historical-hourly-weather-data) the temperature.csv, weather_description.csv and wind_speed.csv. I bind them and pick the May of 2016 to make my final weather.csv which i'm gonna use for my analysis. Also i change the temperature from kelvin to Celsius. 
+
+
+```{r,eval=F, echo=T}
+tempr <- read.csv("temperature.csv", sep = ','
+                    ,stringsAsFactors = T, header = T)
+descr <- read.csv("weather_description.csv", sep = ','
+                  ,stringsAsFactors = T, header = T)
+wind <- read.csv("wind_speed.csv", sep = ','
+                 ,stringsAsFactors = T, header = T)
+
+
+weather <- data.frame(tempr$datetime, tempr$New.York, descr$New.York, wind$New.York)
+weather <- weather[grepl("2016-05",weather$tempr.datetime), ]
+
+names(weather) <- c("timestamp","temperature","description","wind")
+weather$temperature <- weather$temperature - 273.15
+
+write.csv(weather, file = "weather.csv",row.names = F)
+```
+
+### Loading the libraries
+```{r,warning=FALSE,message=FALSE}
+library(RColorBrewer)
+library(ggplot2)
+library(data.table)
+library(tidyr)
+library(dplyr)
+library(lubridate)
+library(ggmap)
+library(randomForest)
+
+```
+
+
+### downloading 
+```{r}
+temp <- tempfile()
+download.file("https://s3.amazonaws.com/tripdata/JC-201605-citibike-tripdata.csv.zip",temp, mode="wb")
+unzip(temp, "JC-201605-citibike-tripdata.csv")
+unlink(temp)
+
+```
+
+
+#### Loading the datasets
+```{r}
+data <- read.csv("JC-201605-citibike-tripdata.csv", sep = ','
+                 ,stringsAsFactors = TRUE, header = TRUE, na.strings =c(""," "))
+weather <- read.csv("weather.csv", sep = ','
+                    ,stringsAsFactors = TRUE, header = TRUE)
+```
+
+```{r}
+head(data,5)
+```
+
+### Data Structure and dimension
+```{r}
+dim(data)
+```
+```{r}
+str(data)
+```
+```{r}
+data$Start.Station.ID <- as.factor(data$Start.Station.ID)
+data$End.Station.ID <- as.factor(data$End.Station.ID)
+
+```
+
+#### Changing the Gender entries for better plot understanding
+```{r}
+data$Gender <- as.character(data$Gender)
+data$Gender <- ifelse(data$Gender=="0","Unknown",ifelse(data$Gender=="1","Male","Female"))
+data$Gender <- as.factor(data$Gender)
+```
+
+#### Changing the Birth Year column with a Age column
+```{r}
+data <- data %>% mutate(Age=2016-Birth.Year) %>% select(-c("Birth.Year"))
+```
+### Checking for NA
+```{r}
+sapply(data, function(x) sum(is.na(x)))
+```
+#### removing the rows with NA User Type. It's only 8 so we can drop them.
+```{r}
+data<-data[!is.na(data$User.Type),]
+sum(is.na(data$User.Type))
+```
+#### Checking the Trip Duration column for anomalies and outliers
+```{r}
+summary(data$Trip.Duration)
+```
+#### Using a bike for 237444 sec = 3957 min has no sense. So i am gonna remove trip durations more than a hour(3600 sec) but also i'm gonna save the upper whisker for more useful plots.
+
+```{r}
+u_whisker <- boxplot.stats(data$Trip.Duration)$stats[5]
+data<-data[data$Trip.Duration<3600,]
+
+```
+### Checking if the timestamps have the same format
+```{r}
+sum(is.na(as.POSIXct(data$Start.Time,format = "%Y-%m-%d %H:%M:%S")))
+sum(is.na(as.POSIXct(data$Stop.Time,format = "%Y-%m-%d %H:%M:%S")))
+```
+### Implement a linear regression model to fill NA at Age column
+```{r}
+data$Age <- as.numeric(as.character(data$Age))
+data$Bike.ID <- as.numeric(as.character(data$Bike.ID))
+na.year <- data[is.na(data$Age),]
+
+rf <- randomForest(Age~Trip.Duration+Start.Station.ID+End.Station.ID+User.Type+Gender,
+                   ntree=10,data=data,na.action=na.omit)
+year_pred <- predict(rf, newdata = data[is.na(data$Age), ][c("Trip.Duration","Start.Station.ID",
+                                                             "End.Station.ID","User.Type",
+                                                             "Gender")])
+data[is.na(data$Age),]$Age <- round(year_pred)
+sum(is.na(data$Age))
+```
+
+## Data Visualization
+
+#### Popular Start and End stations
+```{r}
+
+ggplot(as.data.frame(sort(table(data$Start.Station.Name),decreasing=TRUE)[1:5]),aes(Var1, Freq)) + 
+    geom_col(aes(fill=Var1))+ coord_flip() + theme(legend.position = "none") + 
+  labs(title = "Most Frequent Start Stations", y = "Frequency", x = "Stations") +
+  geom_text(aes(label= Freq), size = 3, position = position_stack(vjust = 0.5))
+
+ggplot(as.data.frame(sort(table(data$End.Station.Name),decreasing=TRUE)[1:5]),aes(Var1, Freq)) + 
+  geom_col(aes(fill=Var1)) + coord_flip() + theme(legend.position = "none") + 
+  labs(title = "Most Frequent End Stations", y = "Frequency", x = "Stations") +
+  geom_text(aes(label= Freq), size = 3, position = position_stack(vjust = 0.5))
+``` 
+ 
+#### Most popular destination from every station
+```{r}
+Number_of_routes <- setDT(data)[, .N, by=.(Start.Station.Name,End.Station.Name)][, .SD[which.max(N)], by = Start.Station.Name]
+Number_of_routes <- Number_of_routes[order(Start.Station.Name),]
+Number_of_routes$Percentage <- round(Number_of_routes[order(Start.Station.Name),]$N/table(data$Start.Station.Name),2)
+Number_of_routes$Percentage <- Number_of_routes$Percentage*100
+names(Number_of_routes) <- c("Start Station Name", "End Station Name", "Number of routes", "% Percentage")
+Number_of_routes
+```
+ 
+#### Most popular routes
+```{r}
+myFreqs <- data %>% 
+  group_by(Start.Station.Name, End.Station.Name) %>%
+  summarise(Freq = n())
+
+myFreqs$routes <- paste(myFreqs$Start.Station.Name,"-",myFreqs$End.Station.Name)
+myFreqs <- myFreqs[order(myFreqs$Freq, decreasing = T),]
+
+ggplot(data=myFreqs[1:5,],aes(x=routes,y=Freq)) + 
+  geom_col(aes(fill=routes)) + coord_flip() + theme(legend.position = "none") + 
+  labs(title = "Most popular routes", y = "Frequency", x = "Routes") +
+  geom_text(aes(label= Freq), size = 3, position = position_stack(vjust = 0.5))
+
+```
+
+#### Trip duration graph for entries lower than upper whisker
+```{r}
+ggplot(data[data$Trip.Duration<u_whisker, ],aes(x=Trip.Duration)) + 
+  geom_line(aes(fill="count"), stat="bin", binwidth=50,size=1,color="Blue") +
+  labs(title="Plot of Trip Durations", x="Trip Duration") 
+```
+ 
+#### User types and mean duration per type
+```{r}
+ggplot(data, aes(x=User.Type))+ geom_bar(aes(fill=User.Type)) + 
+  labs(title = "Number of User Types", x= "User Type")
+```
+
+```{r}
+ggplot(data, aes(x=User.Type, y=Trip.Duration, fill=User.Type)) + 
+  stat_summary(fun.y="mean", geom="bar") + 
+  labs(title = "Mean Trip Duration per User Type", x= "User Type", y="mean Trip Duration")
+```
+
+
+```{r}
+boxplot(Trip.Duration~User.Type, data=data[data$Trip.Duration<u_whisker,],main = "Trip Duration per User Type ", 
+        xlab = "User Type", ylab = "Trip Duration", col = "Green")
+```
+
+#### As we can see the Subscibers (annual membership) are more than Customers (24 hour or 3-day pass) but the Customers use the bikes for longer duration
+ 
+ 
+#### Number of Gender per type and mean trip duration per Gender. As we can see the users who dont declare the sex use bikes for longer duration
+```{r}
+ggplot(data, aes(x=Gender))+ geom_bar(aes(fill=Gender)) + labs(title = "Number of Gender Types")
+ggplot(data, aes(x=Gender, y=Trip.Duration, fill=Gender)) + 
+  stat_summary(fun.y="mean", geom="bar") + 
+  labs(title = "Mean Trip Duration per Gender", y="mean Trip Duration")
+```
+ 
+#### Most users are between 20 and 40 and also the users who dont declare the sex are between 30 and 35.
+```{r}
+ggplot(data, aes(x=Age,group=Gender,colour=Gender)) + geom_freqpoly(stat = "bin",size=1) 
+
+```
+
+```{r}
+ggplot(data, aes(x=Age,y=Trip.Duration ,colour=Gender)) + 
+  stat_summary(fun.y="mean", geom="line", size=1) + facet_grid(Gender ~ .) + 
+  labs(title = "Relationship between Mean Trip Duration and Age per Gender", y="mean Trip Duration")
+```
+
+#### Most popular Bikes
+```{r}
+pop_bikes <- sort(table(data$Bike.ID),decreasing=TRUE)[1:5]
+ggplot(as.data.frame(pop_bikes),aes(Var1, Freq)) + coord_flip() + geom_col(aes(fill=Var1)) + 
+  labs(title = "Most used bikes", y="Number of times used",x="Bike ID") + theme(legend.position = "none") +
+  geom_text(aes(label= Freq), size = 3, position = position_stack(vjust = 0.5))
+```
+ 
+#### We can see that the trips during the weekdays are more than weekend but also sorter. It seems logical because as we can assume that the purpose of usage at weekdays is more about going to work or different kind of business. On the contrary we can assume tha the purpose of weekend usage is more about fun puproses while the user have not the pressure of time. Also subscribers use bikes more often at the weekday and customers more often at the weekend.
+```{r}
+data$day <- wday(data$Start.Time,label = TRUE,abbr = FALSE,week_start = getOption("lubridate.week.start", 7), locale = "English_United States")
+
+ggplot(data, aes(x=day, y=Trip.Duration, fill=day)) + 
+  stat_summary(fun.y="mean", geom="bar") + 
+  labs(title = "Mean Trip Duration per Day", y="mean Trip Duration")
+
+ggplot(data, aes(x=day,fill=day))+geom_bar() + 
+  labs(title = "Number of trips per day")
+
+ggplot(data, aes(x=day,fill=User.Type))+geom_bar() + 
+  labs(title = "Number of trips per day") + facet_grid(User.Type ~ .)
+```
+ 
+### Rush hour graph
+#### We can assume that the most subscribers use the bike as mean of transport to go or leave from work this is why we have so many entries around 8 am and 18 pm. Usually customers rent a bike for 24 hours so its seems reasonable to assume that most of them are tourists and using them to move around to see the sights of New Jersey.
+```{r}
+ggplot(data, aes(x=hour(data$Start.Time),fill=as.factor(hour(data$Start.Time))))+geom_bar() + 
+  labs(title = "Rush Hour", x="Hour") + facet_grid(User.Type ~ .) + theme(legend.position = "none") 
+```
+ 
+### Heatmap of Start stations and top five Start Station position
+```{r}
+chi_bb <- c(left = min(data$Start.Station.Longitude),
+            bottom = min(data$Start.Station.Latitude),
+            right = max(data$Start.Station.Longitude+0.01),
+            top = max(data$Start.Station.Latitude))
+JC_stamen <- get_stamenmap(bbox = chi_bb,zoom = 13)
+pointstolabel <- c("Grove St PATH", "Exchange Place", "Sip Ave", "Hamilton Park", "Newport PATH") 
+                                
+```
+
+
+```{r,warning=FALSE,message=FALSE}
+ggmap(JC_stamen) +
+  stat_density_2d(data = data,
+                  mapping = aes(x = Start.Station.Longitude,
+                                y = Start.Station.Latitude,fill = stat(level)),
+                  alpha = .2,
+                  bins = 50,
+                  geom = "polygon") + scale_fill_gradientn(colors = brewer.pal(7, "YlOrRd")) +
+  geom_point(data = data, color=I("red"), 
+             mapping = aes(x = Start.Station.Longitude,
+                           y = Start.Station.Latitude)) + 
+  geom_text(data=subset(data, Start.Station.Name %in% pointstolabel), 
+            aes(x= Start.Station.Longitude, y = Start.Station.Latitude, 
+                label = Start.Station.Name, color=I("Grey20"))) + 
+  theme(legend.position = "none") + 
+  labs(title = "Heatmap of Start Station Popularity", y = "Latitude", x = "Longitude")
+```
+
+### Heatmap of End stations and top five End Station position
+
+```{r,warning=FALSE,message=FALSE}
+ggmap(JC_stamen) +
+  stat_density_2d(data = data,
+                  mapping = aes(x = End.Station.Longitude,
+                                y = End.Station.Latitude,fill = stat(level)),
+                  alpha = .2,
+                  bins = 50,
+                  geom = "polygon") + scale_fill_gradientn(colors = brewer.pal(7, "YlOrRd")) +
+  geom_point(data = data, color=I("red"), 
+             mapping = aes(x = End.Station.Longitude,
+                           y = End.Station.Latitude)) + 
+  geom_text(data=subset(data, End.Station.Name %in% pointstolabel), 
+            aes(x= End.Station.Longitude, y = End.Station.Latitude, 
+                label = End.Station.Name, color=I("Grey20"))) + 
+  theme(legend.position = "none") + 
+  labs(title = "Heatmap of End Station Popularity", y = "Latitude", x = "Longitude")
+``` 
+ 
+ 
+### Joining data and weather dataset
+
+#### Creating common column for joining purposes.
+```{r}
+weather$mc <- substr(weather[,1],1,13)
+data$mc <- substr(data[,as.character(Start.Time)], 1, 13)
+total <- merge(data,weather, by="mc")
+total <- select(total,-c(mc,timestamp))
+total$temperature <- round(total$temperature)
+```
+ 
+#### description engineering
+```{r}
+total$description <- as.character(total$description)
+total$description[total$description %in% c("thunderstorm with light rain","thunderstorm",
+                                           "proximity thunderstorm")] <- "Thunderstorm"
+total$description[total$description %in% c("drizzle","light intensity drizzle",
+                                           "moderate rain","light rain")] <- "Rainy"
+total$description[total$description %in% c("broken clouds","few clouds","overcast clouds",
+                                           "scattered clouds")] <- "Cloudy"
+total$description[total$description %in% c("fog","haze","mist")] <- "Mist"
+total$description[total$description=="sky is clear"] <- "Clear"
+
+total$description <- as.factor(total$description)
+levels(total$description)
+```
+
+###  Impact of weather on the trip duration
+
+
+#### We can see that the most routes start with cloudy or misty weather and it seem logical because is usual to have mist around 7-9 am and because we are at May the weather can not be so clear or having thunderstorms.
+```{r}
+ggplot(total, aes(x=description))+ geom_bar(aes(fill=description)) + labs(title = "Number of routes per weather condition")
+
+ggplot(total, aes(x=hour(total$Start.Time),fill=description))+geom_bar() + 
+  labs(title = "Rush Hour", x="Hour")
+```
+
+
+
+#### We can see that the weather conditions does not have so much impact at trip duration.
+```{r}
+boxplot(Trip.Duration~description, data= total[total$Trip.Duration<u_whisker, ], col = "orange", main = "Impact of weather on trip duration",  xlab = "Weather conditions", ylab = "Trip Duration")
+```
+ 
+ 
+#### If the wind is more than 5 there are not so many bike users, but the wind's impact is not so big regarding to the mean trip duration.
+```{r}
+total$wind <- as.factor(total$wind)
+ggplot(total, aes(x=wind))+ geom_bar(aes(fill=wind)) + labs(title = "Number of routes per wind condition") + theme(legend.position = "none")
+boxplot(Trip.Duration~wind, data= total[total$Trip.Duration<u_whisker,], col = "blue", main = "Impact of wind on trip duration",  xlab = "Wind", ylab = "Trip Duration")
+```
+ 
+ 
+#### The temperature has impact on trip duration
+```{r}
+ggplot(total, aes(x=temperature))+ geom_bar(aes(fill=as.factor(temperature))) + labs(title = "Number of routes per temperature") + theme(legend.position = "none")
+ggplot(total, aes(x=temperature,y=Trip.Duration)) + 
+  stat_summary(fun.y="mean", geom="line", color="red",size=1) + 
+  labs(title = "Mean Trip Duration per Temperature", y="mean Trip Duration")
+
+```
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+         
