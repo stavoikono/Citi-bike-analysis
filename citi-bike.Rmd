@@ -138,12 +138,8 @@ data<-data[data$Trip.Duration<3600,]
 sum(is.na(as.POSIXct(data$Start.Time,format = "%Y-%m-%d %H:%M:%S")))
 sum(is.na(as.POSIXct(data$Stop.Time,format = "%Y-%m-%d %H:%M:%S")))
 ```
-### Implement a linear regression model to fill NA at Age column
+### Implement a random forest model to fill NA at Age column
 ```{r}
-data$Age <- as.numeric(as.character(data$Age))
-data$Bike.ID <- as.numeric(as.character(data$Bike.ID))
-na.year <- data[is.na(data$Age),]
-
 rf <- randomForest(Age~Trip.Duration+Start.Station.ID+End.Station.ID+User.Type+Gender,
                    ntree=10,data=data,na.action=na.omit)
 year_pred <- predict(rf, newdata = data[is.na(data$Age), ][c("Trip.Duration","Start.Station.ID",
@@ -160,13 +156,13 @@ sum(is.na(data$Age))
 
 ggplot(as.data.frame(sort(table(data$Start.Station.Name),decreasing=TRUE)[1:5]),aes(Var1, Freq)) + 
     geom_col(aes(fill=Var1))+ coord_flip() + theme(legend.position = "none") + 
-  labs(title = "Most Frequent Start Stations", y = "Frequency", x = "Stations") +
-  geom_text(aes(label= Freq), size = 3, position = position_stack(vjust = 0.5))
+    labs(title = "Most Frequent Start Stations", y = "Frequency", x = "Stations") +
+    geom_text(aes(label= Freq), size = 3, position = position_stack(vjust = 0.5))
 
 ggplot(as.data.frame(sort(table(data$End.Station.Name),decreasing=TRUE)[1:5]),aes(Var1, Freq)) + 
-  geom_col(aes(fill=Var1)) + coord_flip() + theme(legend.position = "none") + 
-  labs(title = "Most Frequent End Stations", y = "Frequency", x = "Stations") +
-  geom_text(aes(label= Freq), size = 3, position = position_stack(vjust = 0.5))
+    geom_col(aes(fill=Var1)) + coord_flip() + theme(legend.position = "none") + 
+    labs(title = "Most Frequent End Stations", y = "Frequency", x = "Stations") +
+    geom_text(aes(label= Freq), size = 3, position = position_stack(vjust = 0.5))
 ``` 
  
 #### Most popular destination from every station
@@ -288,17 +284,17 @@ pointstolabel <- c("Grove St PATH", "Exchange Place", "Sip Ave", "Hamilton Park"
 ```{r,warning=FALSE,message=FALSE}
 ggmap(JC_stamen) +
   stat_density_2d(data = data,
-                  mapping = aes(x = Start.Station.Longitude,
-                                y = Start.Station.Latitude,fill = stat(level)),
-                  alpha = .2,
-                  bins = 50,
-                  geom = "polygon") + scale_fill_gradientn(colors = brewer.pal(7, "YlOrRd")) +
+              mapping = aes(x = Start.Station.Longitude,
+              y = Start.Station.Latitude,fill = stat(level)),
+              alpha = .2,
+              bins = 50,
+              geom = "polygon") + scale_fill_gradientn(colors = brewer.pal(7, "YlOrRd")) +
   geom_point(data = data, color=I("red"), 
              mapping = aes(x = Start.Station.Longitude,
-                           y = Start.Station.Latitude)) + 
+             y = Start.Station.Latitude)) + 
   geom_text(data=subset(data, Start.Station.Name %in% pointstolabel), 
             aes(x= Start.Station.Longitude, y = Start.Station.Latitude, 
-                label = Start.Station.Name, color=I("Grey20"))) + 
+            label = Start.Station.Name, color=I("Grey20"))) + 
   theme(legend.position = "none") + 
   labs(title = "Heatmap of Start Station Popularity", y = "Latitude", x = "Longitude")
 ```
@@ -309,16 +305,16 @@ ggmap(JC_stamen) +
 ggmap(JC_stamen) +
   stat_density_2d(data = data,
                   mapping = aes(x = End.Station.Longitude,
-                                y = End.Station.Latitude,fill = stat(level)),
+                  y = End.Station.Latitude,fill = stat(level)),
                   alpha = .2,
                   bins = 50,
                   geom = "polygon") + scale_fill_gradientn(colors = brewer.pal(7, "YlOrRd")) +
   geom_point(data = data, color=I("red"), 
-             mapping = aes(x = End.Station.Longitude,
-                           y = End.Station.Latitude)) + 
+            mapping = aes(x = End.Station.Longitude,
+            y = End.Station.Latitude)) + 
   geom_text(data=subset(data, End.Station.Name %in% pointstolabel), 
             aes(x= End.Station.Longitude, y = End.Station.Latitude, 
-                label = End.Station.Name, color=I("Grey20"))) + 
+            label = End.Station.Name, color=I("Grey20"))) + 
   theme(legend.position = "none") + 
   labs(title = "Heatmap of End Station Popularity", y = "Latitude", x = "Longitude")
 ``` 
