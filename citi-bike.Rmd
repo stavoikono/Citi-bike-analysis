@@ -55,7 +55,6 @@ write.csv(weather, file = "weather.csv",row.names = F)
 
 ### Loading the libraries
 ```{r,warning=FALSE,message=FALSE}
-library(RColorBrewer)
 library(ggplot2)
 library(data.table)
 library(tidyr)
@@ -63,7 +62,8 @@ library(dplyr)
 library(lubridate)
 library(ggmap)
 library(randomForest)
-
+library(GGally)
+library(RColorBrewer)
 ```
 
 
@@ -85,6 +85,8 @@ weather <- read.csv("weather.csv", sep = ','
                     ,stringsAsFactors = TRUE, header = TRUE)
 ```
 
+## Data Preprocessing
+
 ```{r}
 head(data,5)
 ```
@@ -96,6 +98,12 @@ dim(data)
 ```{r}
 str(data)
 ```
+```{r}
+data$Start.Time <- as.POSIXct(data$Start.Time,format = "%Y-%m-%d %H:%M:%S")
+data$Stop.Time <- as.POSIXct(data$Stop.Time,format = "%Y-%m-%d %H:%M:%S")
+```
+
+
 ```{r}
 data$Start.Station.ID <- as.factor(data$Start.Station.ID)
 data$End.Station.ID <- as.factor(data$End.Station.ID)
@@ -133,11 +141,6 @@ u_whisker <- boxplot.stats(data$Trip.Duration)$stats[5]
 data<-data[data$Trip.Duration<3600,]
 
 ```
-### Checking if the timestamps have the same format
-```{r}
-sum(is.na(as.POSIXct(data$Start.Time,format = "%Y-%m-%d %H:%M:%S")))
-sum(is.na(as.POSIXct(data$Stop.Time,format = "%Y-%m-%d %H:%M:%S")))
-```
 ### Implement a random forest model to fill NA at Age column
 ```{r}
 rf <- randomForest(Age~Trip.Duration+Start.Station.ID+End.Station.ID+User.Type+Gender,
@@ -149,7 +152,11 @@ data[is.na(data$Age),]$Age <- round(year_pred)
 sum(is.na(data$Age))
 ```
 
-## Data Visualization
+## Exploratory Data Analysis
+```{r}
+ggpairs(data[,c(1,13,14,15)])
+```
+
 
 #### Popular Start and End stations
 ```{r}
