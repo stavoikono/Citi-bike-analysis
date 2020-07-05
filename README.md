@@ -1,6 +1,5 @@
 # Citi-bike-analysis
-#### Analysis of citi bike database for May of 2016 at New Jersey and how the weather affectes 
-#### the usage of bikes
+#### Analysis of citi bike database for May of 2016 at New Jersey and how the weather affectes the usage of bikes
 
 ### Data:
 The site for the dataset can be found at [Citi Bike Dataset](https://www.citibikenyc.com/system-data)
