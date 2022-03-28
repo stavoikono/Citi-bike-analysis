@@ -102,14 +102,12 @@ str(data)
 
 ```{r}
 data <- data %>% 
-  mutate(start_station_id = factor(as.character(start_station_id)),
-         end_station_id = factor(as.character(end_station_id)),
-         bike_id = factor(as.character(bike_id)),
+  mutate(bike_id = factor(as.character(bike_id)),
          gender = factor(case_when(gender==1 ~ "Male",
                             gender==2 ~ "Female",
                             TRUE ~ "Unknown")),
          age = 2016 - birth_year) %>%
-  select(-birth_year) %>%
+  select(-birth_year,-start_station_id,-end_station_id) %>%
   filter(!is.na(user_type))
 ```
 
@@ -126,20 +124,22 @@ data %>% filter(trip_duration<3600) %>%
 data <- data %>% filter(trip_duration<3600)
 ```
 
-
-
-### Implement a random forest model to fill NA at Age column
 ```{r}
-rf <- randomForest(Age~Trip.Duration+Start.Station.ID+End.Station.ID+User.Type+Gender,
-                   ntree=10,data=data,na.action=na.omit)
-year_pred <- predict(rf, newdata = data[is.na(data$Age), ][c("Trip.Duration","Start.Station.ID",
-                                                             "End.Station.ID","User.Type",
-                                                             "Gender")])
-data[is.na(data$Age),]$Age <- round(year_pred)
-sum(is.na(data$Age))
+data_old <- copy(data)
+vars <-c("age","start_time","stop_time","start_station_name",
+                "end_station_name","user_type")
+
+rec <- recipe(formula = ~ .,
+              data = data) %>%
+  step_impute_knn(all_of(vars)) %>% prep()
+
+data <- juice(rec)
 ```
 
+
 ## Exploratory Data Analysis
+
+
 ```{r}
 ggpairs(data[,c(1,13,14,15)])
 ```
