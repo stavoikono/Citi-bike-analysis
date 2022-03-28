@@ -2,6 +2,7 @@
 title: "Citi Bike Analysis"
 author: "Stavros Oikonomou"
 date: "16/2/2020"
+output: pdf_document
 ---
 
 #### Analysis of citi bike database for May of 2016 at New Jersey and how the weather affectes 
@@ -35,35 +36,22 @@ This is the exact [Dataset](https://s3.amazonaws.com/tripdata/JC-201605-citibike
 I download from [Kaggle](https://www.kaggle.com/selfishgene/historical-hourly-weather-data) the temperature.csv, weather_description.csv and wind_speed.csv. I bind them and pick the May of 2016 to make my final weather.csv which i'm gonna use for my analysis. Also i change the temperature from kelvin to Celsius. 
 
 
-```{r,eval=F, echo=T}
-tempr <- read.csv("temperature.csv", sep = ','
-                    ,stringsAsFactors = T, header = T)
-descr <- read.csv("weather_description.csv", sep = ','
-                  ,stringsAsFactors = T, header = T)
-wind <- read.csv("wind_speed.csv", sep = ','
-                 ,stringsAsFactors = T, header = T)
 
-
-weather <- data.frame(tempr$datetime, tempr$New.York, descr$New.York, wind$New.York)
-weather <- weather[grepl("2016-05",weather$tempr.datetime), ]
-
-names(weather) <- c("timestamp","temperature","description","wind")
-weather$temperature <- weather$temperature - 273.15
-
-write.csv(weather, file = "weather.csv",row.names = F)
-```
 
 ### Loading the libraries
 ```{r,warning=FALSE,message=FALSE}
-library(ggplot2)
-library(data.table)
-library(tidyr)
-library(dplyr)
-library(lubridate)
-library(ggmap)
-library(randomForest)
-library(GGally)
-library(RColorBrewer)
+ipak <- function(pkg){
+  new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+  if (length(new.pkg)) 
+    install.packages(new.pkg, dependencies = TRUE)
+  sapply(pkg, require, character.only = TRUE)
+}
+
+packages <- c("dplyr","data.table","ggplot2","tidyr", "MLDataR","tidymodels",
+              "skimr","themis","stacks","lubridate","knitr","GGally","naniar",
+              "lubridate","ggmap","randomForest","RColorBrewer","janitor")
+
+ipak(packages)
 ```
 
 
@@ -78,69 +66,68 @@ unlink(temp)
 
 
 #### Loading the datasets
+```{r,eval=F, echo=T}
+tempr <- fread("data/temperature.csv",stringsAsFactors = T, 
+               header = T, select = c("datetime","New York"))
+
+descr <- fread("data/weather_description.csv",stringsAsFactors = T, 
+               header = T, select = c("datetime","New York"))
+
+wind <- fread("data/wind_speed.csv",stringsAsFactors = T, 
+               header = T, select = c("datetime","New York"))
+
+
+weather <- tempr %>% dplyr::rename("temperature"="New York") %>%
+  filter(grepl("2016-05",datetime)) %>%
+  left_join(descr, by="datetime") %>% dplyr::rename("description"="New York") %>%
+  left_join(wind, by="datetime") %>% dplyr::rename("wind"="New York") %>%
+  mutate(temperature = temperature - 273.15)
+```
+
 ```{r}
-data <- read.csv("JC-201605-citibike-tripdata.csv", sep = ','
-                 ,stringsAsFactors = TRUE, header = TRUE, na.strings =c(""," "))
-weather <- read.csv("weather.csv", sep = ','
-                    ,stringsAsFactors = TRUE, header = TRUE)
+data <- fread("JC-201605-citibike-tripdata.csv", sep = ',',
+                 stringsAsFactors = TRUE, header = TRUE, na.strings =c(""," ")) %>%
+  janitor::clean_names()
 ```
 
 ## Data Preprocessing
 
-```{r}
-head(data,5)
-```
+
 
 ### Data Structure and dimension
-```{r}
-dim(data)
-```
+
 ```{r}
 str(data)
 ```
+
 ```{r}
-data$Start.Time <- as.POSIXct(data$Start.Time,format = "%Y-%m-%d %H:%M:%S")
-data$Stop.Time <- as.POSIXct(data$Stop.Time,format = "%Y-%m-%d %H:%M:%S")
+data <- data %>% 
+  mutate(start_station_id = factor(as.character(start_station_id)),
+         end_station_id = factor(as.character(end_station_id)),
+         bike_id = factor(as.character(bike_id)),
+         gender = factor(case_when(gender==1 ~ "Male",
+                            gender==2 ~ "Female",
+                            TRUE ~ "Unknown")),
+         age = 2016 - birth_year) %>%
+  select(-birth_year) %>%
+  filter(!is.na(user_type))
+```
+
+```{r}
+skim(data)
 ```
 
 
 ```{r}
-data$Start.Station.ID <- as.factor(data$Start.Station.ID)
-data$End.Station.ID <- as.factor(data$End.Station.ID)
+data %>% filter(trip_duration<3600) %>%
+  ggplot(aes(x=trip_duration)) + geom_density(fill=I("red"), alpha=0.4) + theme_classic() +
+  xlab("Trip Duration")
 
-```
-
-#### Changing the Gender entries for better plot understanding
-```{r}
-data$Gender <- as.character(data$Gender)
-data$Gender <- ifelse(data$Gender=="0","Unknown",ifelse(data$Gender=="1","Male","Female"))
-data$Gender <- as.factor(data$Gender)
+data <- data %>% filter(trip_duration<3600)
 ```
 
-#### Changing the Birth Year column with a Age column
-```{r}
-data <- data %>% mutate(Age=2016-Birth.Year) %>% select(-c("Birth.Year"))
-```
-### Checking for NA
-```{r}
-sapply(data, function(x) sum(is.na(x)))
-```
-#### removing the rows with NA User Type. It's only 8 so we can drop them.
-```{r}
-data<-data[!is.na(data$User.Type),]
-sum(is.na(data$User.Type))
-```
-#### Checking the Trip Duration column for anomalies and outliers
-```{r}
-summary(data$Trip.Duration)
-```
-#### Using a bike for 237444 sec = 3957 min has no sense. So i am gonna remove trip durations more than a hour(3600 sec) but also i'm gonna save the upper whisker for more useful plots.
 
-```{r}
-u_whisker <- boxplot.stats(data$Trip.Duration)$stats[5]
-data<-data[data$Trip.Duration<3600,]
 
-```
 ### Implement a random forest model to fill NA at Age column
 ```{r}
 rf <- randomForest(Age~Trip.Duration+Start.Station.ID+End.Station.ID+User.Type+Gender,
