@@ -6,3 +6,4 @@
 *.html
 *.pdf
 rsconnect/
+.Rproj.user

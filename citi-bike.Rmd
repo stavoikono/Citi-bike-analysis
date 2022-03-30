@@ -140,127 +140,92 @@ data <- juice(rec)
 ## Exploratory Data Analysis
 
 
-```{r}
-ggpairs(data[,c(1,13,14,15)])
-```
+```{r, warning=FALSE, message=FALSE}
+data %>%
+  select(trip_duration,age,gender, user_type) %>%
+  ggpairs(aes(colour = user_type, alpha = 0.7))
 
+```
+As we can see we don't have information about the gender for the Customers.
 
 #### Popular Start and End stations
 ```{r}
+data %>% count(start_station_name,sort = T) %>% top_n(5) %>%
+  ggplot(aes(x=start_station_name, y=n)) +
+  geom_col(aes(fill=start_station_name))+ coord_flip() + theme(legend.position = "none") + 
+  labs(title = "Most Frequent Start Stations", y = "Frequency", x = "Stations") +
+  geom_text(aes(label= n), size = 3, position = position_stack(vjust = 0.5))
 
-ggplot(as.data.frame(sort(table(data$Start.Station.Name),decreasing=TRUE)[1:5]),aes(Var1, Freq)) + 
-    geom_col(aes(fill=Var1))+ coord_flip() + theme(legend.position = "none") + 
-    labs(title = "Most Frequent Start Stations", y = "Frequency", x = "Stations") +
-    geom_text(aes(label= Freq), size = 3, position = position_stack(vjust = 0.5))
-
-ggplot(as.data.frame(sort(table(data$End.Station.Name),decreasing=TRUE)[1:5]),aes(Var1, Freq)) + 
-    geom_col(aes(fill=Var1)) + coord_flip() + theme(legend.position = "none") + 
-    labs(title = "Most Frequent End Stations", y = "Frequency", x = "Stations") +
-    geom_text(aes(label= Freq), size = 3, position = position_stack(vjust = 0.5))
+data %>% count(end_station_name,sort = T) %>% top_n(5) %>%
+  ggplot(aes(x=end_station_name, y=n)) +
+  geom_col(aes(fill=end_station_name))+ coord_flip() + theme(legend.position = "none") + 
+  labs(title = "Most Frequent End Stations", y = "Frequency", x = "Stations") +
+  geom_text(aes(label= n), size = 3, position = position_stack(vjust = 0.5))
 ``` 
  
 #### Most popular destination from every station
 ```{r}
-Number_of_routes <- setDT(data)[, .N, by=.(Start.Station.Name,End.Station.Name)][, .SD[which.max(N)], by = Start.Station.Name]
-Number_of_routes <- Number_of_routes[order(Start.Station.Name),]
-Number_of_routes$Percentage <- round(Number_of_routes[order(Start.Station.Name),]$N/table(data$Start.Station.Name),2)
-Number_of_routes$Percentage <- Number_of_routes$Percentage*100
-names(Number_of_routes) <- c("Start Station Name", "End Station Name", "Number of routes", "% Percentage")
-Number_of_routes
+data %>% group_by(start_station_name, end_station_name) %>%
+  dplyr::summarise(N=n()) %>%
+  arrange(desc(N)) %>%
+  ungroup() %>% 
+  group_by(start_station_name) %>%
+  mutate(N_start=sum(N)) %>%
+  mutate(percentage=round(N/N_start,2)*100) %>%
+  setNames(c("Start Station Name", "End Station Name", "Number of routes",
+             "Count of entries Start Station",  "% Percentage")) %>% kable()
+
 ```
  
-#### Most popular routes
-```{r}
-myFreqs <- data %>% 
-  group_by(Start.Station.Name, End.Station.Name) %>%
-  summarise(Freq = n())
-
-myFreqs$routes <- paste(myFreqs$Start.Station.Name,"-",myFreqs$End.Station.Name)
-myFreqs <- myFreqs[order(myFreqs$Freq, decreasing = T),]
-
-ggplot(data=myFreqs[1:5,],aes(x=routes,y=Freq)) + 
-  geom_col(aes(fill=routes)) + coord_flip() + theme(legend.position = "none") + 
-  labs(title = "Most popular routes", y = "Frequency", x = "Routes") +
-  geom_text(aes(label= Freq), size = 3, position = position_stack(vjust = 0.5))
-
-```
-
-#### Trip duration graph for entries lower than upper whisker
-```{r}
-ggplot(data[data$Trip.Duration<u_whisker, ],aes(x=Trip.Duration)) + 
-  geom_line(aes(fill="count"), stat="bin", binwidth=50,size=1,color="Blue") +
-  labs(title="Plot of Trip Durations", x="Trip Duration") 
-```
- 
-#### User types and mean duration per type
-```{r}
-ggplot(data, aes(x=User.Type))+ geom_bar(aes(fill=User.Type)) + 
-  labs(title = "Number of User Types", x= "User Type")
-```
-
-```{r}
-ggplot(data, aes(x=User.Type, y=Trip.Duration, fill=User.Type)) + 
-  stat_summary(fun.y="mean", geom="bar") + 
-  labs(title = "Mean Trip Duration per User Type", x= "User Type", y="mean Trip Duration")
-```
 
 
-```{r}
-boxplot(Trip.Duration~User.Type, data=data[data$Trip.Duration<u_whisker,],main = "Trip Duration per User Type ", 
-        xlab = "User Type", ylab = "Trip Duration", col = "Green")
-```
 
 #### As we can see the Subscibers (annual membership) are more than Customers (24 hour or 3-day pass) but the Customers use the bikes for longer duration
  
  
 #### Number of Gender per type and mean trip duration per Gender. As we can see the users who dont declare the sex use bikes for longer duration
-```{r}
-ggplot(data, aes(x=Gender))+ geom_bar(aes(fill=Gender)) + labs(title = "Number of Gender Types")
-ggplot(data, aes(x=Gender, y=Trip.Duration, fill=Gender)) + 
-  stat_summary(fun.y="mean", geom="bar") + 
-  labs(title = "Mean Trip Duration per Gender", y="mean Trip Duration")
-```
+
  
 #### Most users are between 20 and 40 and also the users who dont declare the sex are between 30 and 35.
-```{r}
-ggplot(data, aes(x=Age,group=Gender,colour=Gender)) + geom_freqpoly(stat = "bin",size=1) 
 
-```
-
-```{r}
-ggplot(data, aes(x=Age,y=Trip.Duration ,colour=Gender)) + 
-  stat_summary(fun.y="mean", geom="line", size=1) + facet_grid(Gender ~ .) + 
-  labs(title = "Relationship between Mean Trip Duration and Age per Gender", y="mean Trip Duration")
-```
 
 #### Most popular Bikes
 ```{r}
-pop_bikes <- sort(table(data$Bike.ID),decreasing=TRUE)[1:5]
-ggplot(as.data.frame(pop_bikes),aes(Var1, Freq)) + coord_flip() + geom_col(aes(fill=Var1)) + 
-  labs(title = "Most used bikes", y="Number of times used",x="Bike ID") + theme(legend.position = "none") +
-  geom_text(aes(label= Freq), size = 3, position = position_stack(vjust = 0.5))
+data %>% count(bike_id, sort = T) %>% ggplot(aes(x=n)) + geom_density(fill=I("lightblue")) +
+  xlab("Number of usage for each Bike") + ggtitle("Distribution of Bike usage") +
+  theme_bw()
+
 ```
  
 #### We can see that the trips during the weekdays are more than weekend but also sorter. It seems logical because as we can assume that the purpose of usage at weekdays is more about going to work or different kind of business. On the contrary we can assume tha the purpose of weekend usage is more about fun puproses while the user have not the pressure of time. Also subscribers use bikes more often at the weekday and customers more often at the weekend.
 ```{r}
-data$day <- wday(data$Start.Time,label = TRUE,abbr = FALSE,week_start = getOption("lubridate.week.start", 7), locale = "English_United States")
+data <- data %>% 
+  mutate(day=wday(start_time, label=TRUE, abbr=FALSE, 
+         week_start = getOption("lubridate.week.start", 7), 
+         locale = "English_United States")) %>%
+  mutate(hour=as.factor(hour(start_time)))
 
-ggplot(data, aes(x=day, y=Trip.Duration, fill=day)) + 
+ggplotly(ggplot(data, aes(x=day,fill=day))+geom_bar() + 
+  labs(title = "Number of trips per day"))
+
+ggplotly(ggplot(data, aes(x=day, y=trip_duration, fill=day)) + 
   stat_summary(fun.y="mean", geom="bar") + 
-  labs(title = "Mean Trip Duration per Day", y="mean Trip Duration")
+  labs(title = "Mean Trip Duration per Day", y="Duration in seconds") + theme_bw())
 
-ggplot(data, aes(x=day,fill=day))+geom_bar() + 
-  labs(title = "Number of trips per day")
-
-ggplot(data, aes(x=day,fill=User.Type))+geom_bar() + 
-  labs(title = "Number of trips per day") + facet_grid(User.Type ~ .)
+ggplotly(ggplot(data, aes(x=day,fill=user_type))+geom_bar() + 
+  labs(title = "Number of trips per day") + facet_grid(user_type ~ .))
 ```
  
 ### Rush hour graph
 #### We can assume that the most subscribers use the bike as mean of transport to go or leave from work this is why we have so many entries around 8 am and 18 pm. Usually customers rent a bike for 24 hours so its seems reasonable to assume that most of them are tourists and using them to move around to see the sights of New Jersey.
 ```{r}
-ggplot(data, aes(x=hour(data$Start.Time),fill=as.factor(hour(data$Start.Time))))+geom_bar() + 
-  labs(title = "Rush Hour", x="Hour") + facet_grid(User.Type ~ .) + theme(legend.position = "none") 
+ggplotly(
+  ggplot(data, aes(x=hour, fill=hour)) +geom_bar() + 
+  labs(title = "Rush Hour", x="Hour") + 
+  facet_grid(user_type ~ .) +
+  theme(legend.position = "none") + theme_bw()
+  )
+
 ```
  
 ### Heatmap of Start stations and top five Start Station position
