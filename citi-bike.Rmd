@@ -231,21 +231,39 @@ ggplotly(
  
 ### Heatmap of Start stations and top five Start Station position
 ```{r}
-data_map <- data %>% select(lat=start_station_latitude, 
+data_map_start <- data %>% select(lat=start_station_latitude, 
                             long=start_station_longitude,
                             name=start_station_name) %>%
   group_by(lat) %>%
   mutate(N=n()) %>%
-  distinct()
+  distinct() %>%
+  mutate(popup = paste(sep = "<br/>",paste("<center>",name,"</center>"),
+                       paste("<center>",N,"</center>")))
 
-data_map %>% leaflet() %>% addTiles() %>% addMarkers(popup = ~name) %>%
+data_map_start %>% leaflet() %>% addTiles() %>% addMarkers(popup = ~name) %>%
   addHeatmap(lng=~long,lat=~lat,intensity=~sqrt(N),max = ~max(sqrt(N)),
              radius = 60, blur = 100) %>%
   addCircleMarkers(lng = ~long, lat=~lat, radius = ~sqrt(N),
-                  fillOpacity = 0.2, opacity = 0.2,color = "red"
+                  fillOpacity = 0.1, opacity = 0.1, color = "red"
                   )
   
- 
+
+data_map_end <- data %>% select(lat=end_station_latitude, 
+                                long=end_station_longitude,
+                                name=end_station_name) %>%
+  group_by(lat) %>%
+  mutate(N=n()) %>%
+  distinct() %>%
+  mutate(popup = paste(sep = "<br/>",paste0("<center>",name,"</center>"),
+                       paste0("<center>",N,"</center>")))
+
+data_map_end %>% leaflet() %>% addTiles() %>% addMarkers(popup = ~popup) %>%
+  addHeatmap(lng=~long,lat=~lat,intensity=~sqrt(N),max = ~max(sqrt(N)),
+             radius = 60, blur = 100) %>%
+  addCircleMarkers(lng = ~long, lat=~lat, radius = ~sqrt(N),
+                  fillOpacity = 0.1, opacity = 0.1, color = "red"
+                  )
+  
                                 
 ```
 
