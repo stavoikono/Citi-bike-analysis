@@ -49,7 +49,8 @@ ipak <- function(pkg){
 
 packages <- c("dplyr","data.table","ggplot2","tidyr", "MLDataR","tidymodels",
               "skimr","themis","stacks","lubridate","knitr","GGally","naniar",
-              "lubridate","ggmap","randomForest","RColorBrewer","janitor")
+              "lubridate","ggmap","randomForest","RColorBrewer","janitor","plotly",
+              "leaflet", "leaflet.extra")
 
 ipak(packages)
 ```
@@ -230,17 +231,34 @@ ggplotly(
  
 ### Heatmap of Start stations and top five Start Station position
 ```{r}
+data_map <- data %>% select(lat=start_station_latitude, 
+                            long=start_station_longitude,
+                            name=start_station_name) %>%
+  group_by(lat) %>%
+  mutate(N=n()) %>%
+  distinct()
+
+data_map %>% leaflet() %>% addTiles() %>% addMarkers(popup = ~name) %>%
+  addHeatmap(lng=~long,lat=~lat,intensity=~sqrt(N),max = ~max(sqrt(N)),
+             radius = 60, blur = 100) %>%
+  addCircleMarkers(lng = ~long, lat=~lat, radius = ~sqrt(N),
+                  fillOpacity = 0.2, opacity = 0.2,color = "red"
+                  )
+  
+ 
+                                
+```
+
+
+```{r,warning=FALSE,message=FALSE, include=FALSE, eval=FALSE}
+
 chi_bb <- c(left = min(data$Start.Station.Longitude),
             bottom = min(data$Start.Station.Latitude),
             right = max(data$Start.Station.Longitude+0.01),
             top = max(data$Start.Station.Latitude))
 JC_stamen <- get_stamenmap(bbox = chi_bb,zoom = 13)
-pointstolabel <- c("Grove St PATH", "Exchange Place", "Sip Ave", "Hamilton Park", "Newport PATH") 
-                                
-```
+pointstolabel <- c("Grove St PATH", "Exchange Place", "Sip Ave", "Hamilton Park", "Newport PATH")
 
-
-```{r,warning=FALSE,message=FALSE}
 ggmap(JC_stamen) +
   stat_density_2d(data = data,
               mapping = aes(x = Start.Station.Longitude,
@@ -256,11 +274,7 @@ ggmap(JC_stamen) +
             label = Start.Station.Name, color=I("Grey20"))) + 
   theme(legend.position = "none") + 
   labs(title = "Heatmap of Start Station Popularity", y = "Latitude", x = "Longitude")
-```
 
-### Heatmap of End stations and top five End Station position
-
-```{r,warning=FALSE,message=FALSE}
 ggmap(JC_stamen) +
   stat_density_2d(data = data,
                   mapping = aes(x = End.Station.Longitude,
@@ -276,7 +290,9 @@ ggmap(JC_stamen) +
             label = End.Station.Name, color=I("Grey20"))) + 
   theme(legend.position = "none") + 
   labs(title = "Heatmap of End Station Popularity", y = "Latitude", x = "Longitude")
-``` 
+```
+
+
  
  
 ### Joining data and weather dataset
