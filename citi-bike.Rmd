@@ -39,25 +39,25 @@ I download from [Kaggle](https://www.kaggle.com/selfishgene/historical-hourly-we
 
 
 ### Loading the libraries
-```{r,warning=FALSE,message=FALSE}
+```{r libraries,warning=FALSE,message=FALSE}
 ipak <- function(pkg){
   new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
   if (length(new.pkg)) 
-    install.packages(new.pkg, dependencies = TRUE)
+    install.packages(new.pkg, dependencies = TRUE,repos = 'http://cran.us.r-project.org')
   sapply(pkg, require, character.only = TRUE)
 }
 
 packages <- c("dplyr","data.table","ggplot2","tidyr", "MLDataR","tidymodels",
               "skimr","themis","stacks","lubridate","knitr","GGally","naniar",
-              "lubridate","ggmap","randomForest","RColorBrewer","janitor","plotly",
-              "leaflet", "leaflet.extra")
+              "lubridate","ggmap","randomForest","RColorBrewer","janitor","forcats",
+              "leaflet", "leaflet.extras","plotly")
 
 ipak(packages)
 ```
 
 
 ### downloading 
-```{r}
+```{r, eval=F}
 temp <- tempfile()
 download.file("https://s3.amazonaws.com/tripdata/JC-201605-citibike-tripdata.csv.zip",temp, mode="wb")
 unzip(temp, "JC-201605-citibike-tripdata.csv")
@@ -67,7 +67,7 @@ unlink(temp)
 
 
 #### Loading the datasets
-```{r,eval=F, echo=T}
+```{r weather , echo=T}
 tempr <- fread("data/temperature.csv",stringsAsFactors = T, 
                header = T, select = c("datetime","New York"))
 
@@ -83,6 +83,8 @@ weather <- tempr %>% dplyr::rename("temperature"="New York") %>%
   left_join(descr, by="datetime") %>% dplyr::rename("description"="New York") %>%
   left_join(wind, by="datetime") %>% dplyr::rename("wind"="New York") %>%
   mutate(temperature = temperature - 273.15)
+
+rm(tempr,descr,wind)
 ```
 
 ```{r}
@@ -128,13 +130,16 @@ data <- data %>% filter(trip_duration<3600)
 ```{r}
 data_old <- copy(data)
 vars <-c("age","start_time","stop_time","start_station_name",
-                "end_station_name","user_type")
+         "end_station_name","user_type")
 
 rec <- recipe(formula = ~ .,
               data = data) %>%
   step_impute_knn(all_of(vars)) %>% prep()
 
 data <- juice(rec)
+
+data <- data %>% 
+    mutate(age_groups = cut(age, breaks= c(-Inf,20,40,60,Inf), labels=c("0-20","20-40","40-60","60+")))
 ```
 
 
@@ -149,16 +154,24 @@ data %>%
 ```
 As we can see we don't have information about the gender for the Customers.
 
+```{r}
+ggplot(data, aes(x=trip_duration, fill=age_groups)) + geom_density(alpha=0.7) +
+  scale_x_log10() + facet_grid(user_type~age_groups) + scale_fill_viridis_d(option="C") +
+  theme_bw()
+```
+
+
+
 #### Popular Start and End stations
 ```{r}
 data %>% count(start_station_name,sort = T) %>% top_n(5) %>%
-  ggplot(aes(x=start_station_name, y=n)) +
+  ggplot(aes(x=fct_reorder(start_station_name,n), y=n)) +
   geom_col(aes(fill=start_station_name))+ coord_flip() + theme(legend.position = "none") + 
   labs(title = "Most Frequent Start Stations", y = "Frequency", x = "Stations") +
   geom_text(aes(label= n), size = 3, position = position_stack(vjust = 0.5))
 
 data %>% count(end_station_name,sort = T) %>% top_n(5) %>%
-  ggplot(aes(x=end_station_name, y=n)) +
+  ggplot(aes(x=fct_reorder(end_station_name,n), y=n)) +
   geom_col(aes(fill=end_station_name))+ coord_flip() + theme(legend.position = "none") + 
   labs(title = "Most Frequent End Stations", y = "Frequency", x = "Stations") +
   geom_text(aes(label= n), size = 3, position = position_stack(vjust = 0.5))
@@ -231,50 +244,108 @@ ggplotly(
  
 ### Heatmap of Start stations and top five Start Station position
 ```{r}
-data_map_start <- data %>% select(lat=start_station_latitude, 
+map_data <- bind_rows(data %>% select(lat=start_station_latitude, 
                             long=start_station_longitude,
                             name=start_station_name) %>%
-  group_by(lat) %>%
-  mutate(N=n()) %>%
-  distinct() %>%
-  mutate(popup = paste(sep = "<br/>",paste("<center>",name,"</center>"),
-                       paste("<center>",N,"</center>")))
-
-data_map_start %>% leaflet() %>% addTiles() %>% addMarkers(popup = ~name) %>%
-  addHeatmap(lng=~long,lat=~lat,intensity=~sqrt(N),max = ~max(sqrt(N)),
-             radius = 60, blur = 100) %>%
-  addCircleMarkers(lng = ~long, lat=~lat, radius = ~sqrt(N),
-                  fillOpacity = 0.1, opacity = 0.1, color = "red"
-                  )
-  
-
-data_map_end <- data %>% select(lat=end_station_latitude, 
+            group_by(lat) %>%
+            mutate(N=n()) %>%
+            distinct() %>%
+            mutate(popup = paste(sep = "<br/>",paste("<center>",name,"</center>"),
+                                 paste("<center>",N,"</center>"))) %>%
+            mutate(position="start"),
+          data %>% select(lat=end_station_latitude, 
                                 long=end_station_longitude,
                                 name=end_station_name) %>%
-  group_by(lat) %>%
-  mutate(N=n()) %>%
-  distinct() %>%
-  mutate(popup = paste(sep = "<br/>",paste0("<center>",name,"</center>"),
-                       paste0("<center>",N,"</center>")))
+            group_by(lat) %>%
+            mutate(N=n()) %>%
+            distinct() %>%
+            mutate(popup = paste(sep = "<br/>",paste0("<center>",name,"</center>"),
+                                 paste0("<center>",N,"</center>"))) %>%
+            mutate(position="end")
+)
+```
 
-data_map_end %>% leaflet() %>% addTiles() %>% addMarkers(popup = ~popup) %>%
-  addHeatmap(lng=~long,lat=~lat,intensity=~sqrt(N),max = ~max(sqrt(N)),
-             radius = 60, blur = 100) %>%
-  addCircleMarkers(lng = ~long, lat=~lat, radius = ~sqrt(N),
-                  fillOpacity = 0.1, opacity = 0.1, color = "red"
-                  )
+
+
+```{r}
+leaflet(map_data) %>%
+  addTiles() %>%
+  addMarkers(data= map_data %>% filter(position=="start"), popup = ~popup,
+             lng = ~long, lat=~lat, group="Start") %>%
+  addMarkers(data= map_data %>% filter(position=="end"), popup = ~popup,
+             lng = ~long, lat=~lat, group = "End") %>%
+  addHeatmap(data= map_data %>% filter(position=="start"),
+             lng=~long,lat=~lat,intensity=~sqrt(N),max = ~max(sqrt(N)),
+             radius = 60, blur = 100,
+             layerId = "Start", group = "Start") %>%
+  addCircleMarkers(data= map_data %>% filter(position=="start"),
+                   lng = ~long, lat=~lat, radius = ~sqrt(N),
+                   fillOpacity = 0.1, opacity = 0.1, color = "red") %>%
+  addHeatmap(data= map_data %>% filter(position=="end"),
+             lng=~long,lat=~lat,intensity=~sqrt(N),max = ~max(sqrt(N)),
+             radius = 60, blur = 100,
+             layerId = "End", group = "End") %>%
+  addCircleMarkers(data= map_data %>% filter(position=="end"),
+                   lng = ~long, lat=~lat, radius = ~sqrt(N),
+                   fillOpacity = 0.1, opacity = 0.1, color = "red") %>%
+  addLayersControl(
+    baseGroups = c("Start","End"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+```
+
+
+```{r}
+library(osrm)
+getOption("osrm.server")
+
+start_point_df <- data_map_start %>%
+  select(id=name, lon=long, lat) %>%
+  as.data.frame()
+
+end_point_df <- data_map_end %>%
+  select(id=name, lon=long, lat) %>%
+  as.data.frame()
+
+distancetable <- osrmTable(src = start_point_df, dst = end_point_df,
+                           measure = c("duration","distance"),osrm.profile = "bike")
+
+osrm_duration <- distancetable$durations %>% as.data.frame() %>%
+  mutate(start_station_name=row.names(.)) %>%
+  pivot_longer(!start_station_name, names_to = "end_station_name", values_to = "duration") %>%
+  filter(duration > 0)
+
+
+osrm_distance <- distancetable$distances %>% as.data.frame() %>%
+  mutate(start_station_name=row.names(.)) %>%
+  pivot_longer(!start_station_name, names_to = "end_station_name", values_to = "distance") %>%
+  filter(distance > 0) %>%
+  mutate(distance=distance/1000)
+```
+
+```{r}
+test_start <- start_point_df[1:2,]
+
+test_end <- end_point_df[5:6,]
+
+route <- osrmRoute(c(-74.04425,40.72760), c(-74.04312,40.71959), overview = 'full')
+
+leaflet() %>% addTiles() %>%
+  addMarkers(c(-74.04312,-74.04425), c(40.71959,40.72760)) %>%
+  addPolylines(route$lon,route$lat)
   
-                                
 ```
 
 
 ```{r,warning=FALSE,message=FALSE, include=FALSE, eval=FALSE}
 
-chi_bb <- c(left = min(data$Start.Station.Longitude),
-            bottom = min(data$Start.Station.Latitude),
-            right = max(data$Start.Station.Longitude+0.01),
-            top = max(data$Start.Station.Latitude))
-JC_stamen <- get_stamenmap(bbox = chi_bb,zoom = 13)
+chi_bb <- c(left = min(data$start_station_longitude),
+            bottom = min(data$start_station_latitude),
+            right = max(data$start_station_longitude),
+            top = max(data$start_station_latitude))
+
+JC_stamen <- get_stamenmap(bbox = chi_bb, zoom=13)
+
 pointstolabel <- c("Grove St PATH", "Exchange Place", "Sip Ave", "Hamilton Park", "Newport PATH")
 
 ggmap(JC_stamen) +
@@ -308,6 +379,49 @@ ggmap(JC_stamen) +
             label = End.Station.Name, color=I("Grey20"))) + 
   theme(legend.position = "none") + 
   labs(title = "Heatmap of End Station Popularity", y = "Latitude", x = "Longitude")
+
+```
+
+
+```{r}
+chi_bb <- c(left = min(data$start_station_longitude),
+            bottom = min(data$start_station_latitude),
+            right = max(data$start_station_longitude),
+            top = max(data$start_station_latitude))
+
+maps <- get_map(chi_bb, maptype='terrain', source='stamen', zoom=13)
+
+trips <- data %>%
+  group_by(start_station_longitude,
+           start_station_latitude,
+           end_station_longitude,
+           end_station_latitude,
+           start_station_name,
+           end_station_name) %>%
+  summarize(rides = n())
+
+
+ggmap(maps,darken = c(.8,"#FFFFFF")) + 
+  geom_segment(data = trips,
+               aes(x = start_station_longitude, 
+                   y = start_station_latitude,
+                   xend = end_station_longitude,
+                   yend = end_station_latitude,
+                   alpha = sqrt(rides)),
+               color = "#000000") + coord_map() + 
+  scale_alpha(range = c(0.0001, .5)) +
+  geom_point(data = trips %>% 
+               group_by(longitude = start_station_longitude,
+                        latitude = start_station_latitude) %>%
+               summarize(rides = sum(rides)),
+             aes(x = longitude, 
+                 y = latitude,
+                 size = rides),
+             color="#009900",alpha=.4) + 
+  scale_size_continuous(range(4,100)) +
+  scale_color_viridis_c() + 
+  scale_fill_viridis_c() + 
+  theme_nothing()
 ```
 
 
@@ -317,27 +431,29 @@ ggmap(JC_stamen) +
 
 #### Creating common column for joining purposes.
 ```{r}
-weather$mc <- substr(weather[,1],1,13)
-data$mc <- substr(data[,as.character(Start.Time)], 1, 13)
-total <- merge(data,weather, by="mc")
-total <- select(total,-c(mc,timestamp))
-total$temperature <- round(total$temperature)
+data_weather <- data %>%
+  mutate(datetime=round_date(ymd_hms(start_time),"hour")) %>%
+  left_join(weather)
 ```
  
 #### description engineering
 ```{r}
-total$description <- as.character(total$description)
-total$description[total$description %in% c("thunderstorm with light rain","thunderstorm",
-                                           "proximity thunderstorm")] <- "Thunderstorm"
-total$description[total$description %in% c("drizzle","light intensity drizzle",
-                                           "moderate rain","light rain")] <- "Rainy"
-total$description[total$description %in% c("broken clouds","few clouds","overcast clouds",
-                                           "scattered clouds")] <- "Cloudy"
-total$description[total$description %in% c("fog","haze","mist")] <- "Mist"
-total$description[total$description=="sky is clear"] <- "Clear"
 
-total$description <- as.factor(total$description)
-levels(total$description)
+data_weather <- data_weather %>%
+  mutate(description=
+           case_when(description %in% c("thunderstorm with light rain",
+                                        "thunderstorm","proximity thunderstorm") ~ "Thunderstorm",
+                     description %in% c("drizzle","light intensity drizzle",
+                                           "moderate rain","light rain") ~ "Rainy",
+                     description %in% c("broken clouds","few clouds","overcast clouds",
+                                           "scattered clouds") ~ "Cloudy",
+                     description %in% c("fog","haze","mist") ~ "Mist",
+                     description=="sky is clear" ~ "Clear",
+                     TRUE ~ NA_character_)) %>%
+  mutate(description=factor(description)) %>%
+  mutate(temp = round(temperature,0)) %>%
+  mutate(wind=factor(wind))
+
 ```
 
 ###  Impact of weather on the trip duration
@@ -345,9 +461,9 @@ levels(total$description)
 
 #### We can see that the most routes start with cloudy or misty weather and it seem logical because is usual to have mist around 7-9 am and because we are at May the weather can not be so clear or having thunderstorms.
 ```{r}
-ggplot(total, aes(x=description))+ geom_bar(aes(fill=description)) + labs(title = "Number of routes per weather condition")
+ggplot(data_weather, aes(x=description))+ geom_bar(aes(fill=description)) + labs(title = "Number of routes per weather condition")
 
-ggplot(total, aes(x=hour(total$Start.Time),fill=description))+geom_bar() + 
+ggplot(data_weather, aes(x=hour(data_weather$start_time),fill=description))+geom_bar() + 
   labs(title = "Rush Hour", x="Hour")
 ```
 
@@ -355,24 +471,24 @@ ggplot(total, aes(x=hour(total$Start.Time),fill=description))+geom_bar() +
 
 #### We can see that the weather conditions does not have so much impact at trip duration.
 ```{r}
-boxplot(Trip.Duration~description, data= total[total$Trip.Duration<u_whisker, ], col = "orange", main = "Impact of weather on trip duration",  xlab = "Weather conditions", ylab = "Trip Duration")
+boxplot(trip_duration ~ description, data= data_weather, col = "orange", main = "Impact of weather on trip duration",  xlab = "Weather conditions", ylab = "Trip Duration")
 ```
  
  
 #### If the wind is more than 5 there are not so many bike users, but the wind's impact is not so big regarding to the mean trip duration.
 ```{r}
-total$wind <- as.factor(total$wind)
-ggplot(total, aes(x=wind))+ geom_bar(aes(fill=wind)) + labs(title = "Number of routes per wind condition") + theme(legend.position = "none")
-boxplot(Trip.Duration~wind, data= total[total$Trip.Duration<u_whisker,], col = "blue", main = "Impact of wind on trip duration",  xlab = "Wind", ylab = "Trip Duration")
+data_weather$wind <- factor(data_weather$wind)
+ggplot(data_weather, aes(x=wind))+ geom_bar(aes(fill=wind)) + labs(title = "Number of routes per wind condition") + theme(legend.position = "none")
+boxplot(trip_duration~wind, data= data_weather, col = "blue", main = "Impact of wind on trip duration",  xlab = "Wind", ylab = "Trip Duration")
 ```
  
  
 #### The temperature has impact on trip duration
 ```{r}
-ggplot(total, aes(x=temperature))+ geom_bar(aes(fill=as.factor(temperature))) + labs(title = "Number of routes per temperature") + theme(legend.position = "none")
-ggplot(total, aes(x=temperature,y=Trip.Duration)) + 
+ggplot(data_weather, aes(x=temp))+ geom_bar(aes(fill=as.factor(temp))) + labs(title = "Number of routes per temperature") + theme(legend.position = "none")
+ggplot(data_weather, aes(x=temp,y=trip_duration)) + 
   stat_summary(fun.y="mean", geom="line", color="red",size=1) + 
-  labs(title = "Mean Trip Duration per Temperature", y="mean Trip Duration")
+  labs(title = "Mean Trip Duration per Temperature", y="mean Trip Duration") + geom_smooth()
 
 ```
  
